@@ -89,21 +89,7 @@ _mm_mulhi_pu16 (__m64 __A, __m64 __B)
     return __A;
 }
 
-#  ifdef __OPTIMIZE__
-extern __inline __m64 __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-_mm_shuffle_pi16 (__m64 __A, int8_t const __N)
-{
-    __m64 ret;
-
-    asm ("pshufw %2, %1, %0\n\t"
-	: "=y" (ret)
-	: "y" (__A), "K" (__N)
-    );
-
-    return ret;
-}
-#  else
-#   define _mm_shuffle_pi16(A, N)					\
+# define _mm_shuffle_pi16(A, N)						\
     ({									\
 	__m64 ret;							\
 									\
@@ -114,7 +100,6 @@ _mm_shuffle_pi16 (__m64 __A, int8_t const __N)
 									\
 	ret;								\
     })
-#  endif
 # endif
 #endif
 
@@ -402,8 +387,10 @@ in_over (__m64 src, __m64 srca, __m64 mask, __m64 dest)
 static force_inline __m64 ldq_u(__m64 *p)
 {
 #ifdef USE_X86_MMX
-    /* x86's alignment restrictions are very relaxed. */
-    return *(__m64 *)p;
+    /* x86's alignment restrictions are very relaxed, but that's no excuse */
+    __m64 r;
+    memcpy(&r, p, sizeof(__m64));
+    return r;
 #elif defined USE_ARM_IWMMXT
     int align = (uintptr_t)p & 7;
     __m64 *aligned_p;
@@ -422,7 +409,9 @@ static force_inline uint32_t ldl_u(const uint32_t *p)
 {
 #ifdef USE_X86_MMX
     /* x86's alignment restrictions are very relaxed. */
-    return *p;
+    uint32_t r;
+    memcpy(&r, p, sizeof(uint32_t));
+    return r;
 #else
     struct __una_u32 { uint32_t x __attribute__((packed)); };
     const struct __una_u32 *ptr = (const struct __una_u32 *) p;
@@ -3555,6 +3544,105 @@ mmx_composite_over_reverse_n_8888 (pixman_implementation_t *imp,
     _mm_empty ();
 }
 
+static force_inline void
+scaled_nearest_scanline_mmx_8888_8888_OVER (uint32_t*       pd,
+                                            const uint32_t* ps,
+                                            int32_t         w,
+                                            pixman_fixed_t  vx,
+                                            pixman_fixed_t  unit_x,
+                                            pixman_fixed_t  src_width_fixed,
+                                            pixman_bool_t   fully_transparent_src)
+{
+    if (fully_transparent_src)
+	return;
+
+    while (w)
+    {
+	__m64 d = load (pd);
+	__m64 s = load (ps + pixman_fixed_to_int (vx));
+	vx += unit_x;
+	while (vx >= 0)
+	    vx -= src_width_fixed;
+
+	store8888 (pd, core_combine_over_u_pixel_mmx (s, d));
+	pd++;
+
+	w--;
+    }
+
+    _mm_empty ();
+}
+
+FAST_NEAREST_MAINLOOP (mmx_8888_8888_cover_OVER,
+		       scaled_nearest_scanline_mmx_8888_8888_OVER,
+		       uint32_t, uint32_t, COVER)
+FAST_NEAREST_MAINLOOP (mmx_8888_8888_none_OVER,
+		       scaled_nearest_scanline_mmx_8888_8888_OVER,
+		       uint32_t, uint32_t, NONE)
+FAST_NEAREST_MAINLOOP (mmx_8888_8888_pad_OVER,
+		       scaled_nearest_scanline_mmx_8888_8888_OVER,
+		       uint32_t, uint32_t, PAD)
+FAST_NEAREST_MAINLOOP (mmx_8888_8888_normal_OVER,
+		       scaled_nearest_scanline_mmx_8888_8888_OVER,
+		       uint32_t, uint32_t, NORMAL)
+
+static force_inline void
+scaled_nearest_scanline_mmx_8888_n_8888_OVER (const uint32_t * mask,
+					      uint32_t *       dst,
+					      const uint32_t * src,
+					      int32_t          w,
+					      pixman_fixed_t   vx,
+					      pixman_fixed_t   unit_x,
+					      pixman_fixed_t   src_width_fixed,
+					      pixman_bool_t    zero_src)
+{
+    __m64 mm_mask;
+
+    if (zero_src || (*mask >> 24) == 0)
+    {
+	/* A workaround for https://gcc.gnu.org/PR47759 */
+	_mm_empty ();
+	return;
+    }
+
+    mm_mask = expand_alpha (load8888 (mask));
+
+    while (w)
+    {
+	uint32_t s = *(src + pixman_fixed_to_int (vx));
+	vx += unit_x;
+	while (vx >= 0)
+	    vx -= src_width_fixed;
+
+	if (s)
+	{
+	    __m64 ms = load8888 (&s);
+	    __m64 alpha = expand_alpha (ms);
+	    __m64 dest  = load8888 (dst);
+
+	    store8888 (dst, (in_over (ms, alpha, mm_mask, dest)));
+	}
+
+	dst++;
+	w--;
+    }
+
+    _mm_empty ();
+}
+
+FAST_NEAREST_MAINLOOP_COMMON (mmx_8888_n_8888_cover_OVER,
+			      scaled_nearest_scanline_mmx_8888_n_8888_OVER,
+			      uint32_t, uint32_t, uint32_t, COVER, TRUE, TRUE)
+FAST_NEAREST_MAINLOOP_COMMON (mmx_8888_n_8888_pad_OVER,
+			      scaled_nearest_scanline_mmx_8888_n_8888_OVER,
+			      uint32_t, uint32_t, uint32_t, PAD, TRUE, TRUE)
+FAST_NEAREST_MAINLOOP_COMMON (mmx_8888_n_8888_none_OVER,
+			      scaled_nearest_scanline_mmx_8888_n_8888_OVER,
+			      uint32_t, uint32_t, uint32_t, NONE, TRUE, TRUE)
+FAST_NEAREST_MAINLOOP_COMMON (mmx_8888_n_8888_normal_OVER,
+			      scaled_nearest_scanline_mmx_8888_n_8888_OVER,
+			      uint32_t, uint32_t, uint32_t, NORMAL, TRUE, TRUE)
+
 #define BSHIFT ((1 << BILINEAR_INTERPOLATION_BITS))
 #define BMSK (BSHIFT - 1)
 
@@ -3866,7 +3954,7 @@ mmx_fetch_a8 (pixman_iter_t *iter, const uint32_t *mask)
 
     while (w && (((uintptr_t)dst) & 15))
     {
-        *dst++ = *(src++) << 24;
+        *dst++ = (uint32_t)*(src++) << 24;
         w--;
     }
 
@@ -3893,7 +3981,7 @@ mmx_fetch_a8 (pixman_iter_t *iter, const uint32_t *mask)
 
     while (w)
     {
-	*dst++ = *(src++) << 24;
+	*dst++ = (uint32_t)*(src++) << 24;
 	w--;
     }
 
@@ -3994,6 +4082,16 @@ static const pixman_fast_path_t mmx_fast_paths[] =
 
     PIXMAN_STD_FAST_PATH    (IN,   a8,       null,     a8,       mmx_composite_in_8_8              ),
     PIXMAN_STD_FAST_PATH    (IN,   solid,    a8,       a8,       mmx_composite_in_n_8_8            ),
+
+    SIMPLE_NEAREST_FAST_PATH (OVER,   a8r8g8b8, x8r8g8b8, mmx_8888_8888                            ),
+    SIMPLE_NEAREST_FAST_PATH (OVER,   a8b8g8r8, x8b8g8r8, mmx_8888_8888                            ),
+    SIMPLE_NEAREST_FAST_PATH (OVER,   a8r8g8b8, a8r8g8b8, mmx_8888_8888                            ),
+    SIMPLE_NEAREST_FAST_PATH (OVER,   a8b8g8r8, a8b8g8r8, mmx_8888_8888                            ),
+
+    SIMPLE_NEAREST_SOLID_MASK_FAST_PATH (OVER, a8r8g8b8, a8r8g8b8, mmx_8888_n_8888                 ),
+    SIMPLE_NEAREST_SOLID_MASK_FAST_PATH (OVER, a8b8g8r8, a8b8g8r8, mmx_8888_n_8888                 ),
+    SIMPLE_NEAREST_SOLID_MASK_FAST_PATH (OVER, a8r8g8b8, x8r8g8b8, mmx_8888_n_8888                 ),
+    SIMPLE_NEAREST_SOLID_MASK_FAST_PATH (OVER, a8b8g8r8, x8b8g8r8, mmx_8888_n_8888                 ),
 
     SIMPLE_BILINEAR_FAST_PATH (SRC, a8r8g8b8,          a8r8g8b8, mmx_8888_8888                     ),
     SIMPLE_BILINEAR_FAST_PATH (SRC, a8r8g8b8,          x8r8g8b8, mmx_8888_8888                     ),

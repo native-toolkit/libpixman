@@ -908,7 +908,7 @@ fast_composite_add_n_8_8 (pixman_implementation_t *imp,
 #define CREATE_BITMASK(n) (0x80000000 >> (n))
 #define UPDATE_BITMASK(n) ((n) >> 1)
 #else
-#define CREATE_BITMASK(n) (1 << (n))
+#define CREATE_BITMASK(n) (1U << (n))
 #define UPDATE_BITMASK(n) ((n) << 1)
 #endif
 
@@ -2343,6 +2343,8 @@ fast_fetch_bilinear_cover (pixman_iter_t *iter, const uint32_t *mask)
     int32_t dist_y;
     int i;
 
+    COMPILE_TIME_ASSERT (BILINEAR_INTERPOLATION_BITS < 8);
+
     fx = info->x;
     ux = iter->image->common.transform->matrix[0][0];
 
@@ -2798,7 +2800,7 @@ bits_image_fetch_separable_convolution_affine (pixman_image_t * image,
 			    repeat (repeat_mode, &rx, bits->width);
 			    repeat (repeat_mode, &ry, bits->height);
 
-			    row = (uint8_t *)bits->bits + bits->rowstride * 4 * ry;
+			    row = (uint8_t *)(bits->bits + bits->rowstride * ry);
 			    pixel = convert_pixel (row, rx) | mask;
 			}
 			else
@@ -2809,7 +2811,7 @@ bits_image_fetch_separable_convolution_affine (pixman_image_t * image,
 			    }
 			    else
 			    {
-				row = (uint8_t *)bits->bits + bits->rowstride * 4 * ry;
+				row = (uint8_t *)(bits->bits + bits->rowstride * ry);
 				pixel = convert_pixel (row, rx) | mask;
 			    }
 			}
@@ -2834,7 +2836,11 @@ bits_image_fetch_separable_convolution_affine (pixman_image_t * image,
 	sgtot = CLIP (sgtot, 0, 0xff);
 	sbtot = CLIP (sbtot, 0, 0xff);
 
+#ifdef WORDS_BIGENDIAN
+	buffer[k] = (satot << 0) | (srtot << 8) | (sgtot << 16) | (sbtot << 24);
+#else
 	buffer[k] = (satot << 24) | (srtot << 16) | (sgtot << 8) | (sbtot << 0);
+#endif
 
     next:
 	vx += ux;
@@ -2911,8 +2917,8 @@ bits_image_fetch_bilinear_affine (pixman_image_t * image,
 	    repeat (repeat_mode, &x2, width);
 	    repeat (repeat_mode, &y2, height);
 
-	    row1 = (uint8_t *)bits->bits + bits->rowstride * 4 * y1;
-	    row2 = (uint8_t *)bits->bits + bits->rowstride * 4 * y2;
+	    row1 = (uint8_t *)(bits->bits + bits->rowstride * y1);
+	    row2 = (uint8_t *)(bits->bits + bits->rowstride * y2);
 
 	    tl = convert_pixel (row1, x1) | mask;
 	    tr = convert_pixel (row1, x2) | mask;
@@ -2947,7 +2953,7 @@ bits_image_fetch_bilinear_affine (pixman_image_t * image,
 	    }
 	    else
 	    {
-		row1 = (uint8_t *)bits->bits + bits->rowstride * 4 * y1;
+		row1 = (uint8_t *)(bits->bits + bits->rowstride * y1);
 		row1 += bpp / 8 * x1;
 
 		mask1 = PIXMAN_FORMAT_A (format)? 0 : 0xff000000;
@@ -2960,7 +2966,7 @@ bits_image_fetch_bilinear_affine (pixman_image_t * image,
 	    }
 	    else
 	    {
-		row2 = (uint8_t *)bits->bits + bits->rowstride * 4 * y2;
+		row2 = (uint8_t *)(bits->bits + bits->rowstride * y2);
 		row2 += bpp / 8 * x1;
 
 		mask2 = PIXMAN_FORMAT_A (format)? 0 : 0xff000000;
@@ -3058,7 +3064,7 @@ bits_image_fetch_nearest_affine (pixman_image_t * image,
 		repeat (repeat_mode, &y0, height);
 	    }
 
-	    row = (uint8_t *)bits->bits + bits->rowstride * 4 * y0;
+	    row = (uint8_t *)(bits->bits + bits->rowstride * y0);
 
 	    buffer[i] = convert_pixel (row, x0) | mask;
 	}
@@ -3084,7 +3090,7 @@ convert_x8r8g8b8 (const uint8_t *row, int x)
 static force_inline uint32_t
 convert_a8 (const uint8_t *row, int x)
 {
-    return *(row + x) << 24;
+    return (uint32_t) *(row + x) << 24;
 }
 
 static force_inline uint32_t
@@ -3256,9 +3262,9 @@ static const pixman_iter_info_t fast_iters[] =
     },
 
 #define AFFINE_FAST_PATHS(name, format, repeat)				\
-    SEPARABLE_CONVOLUTION_AFFINE_FAST_PATH(name, format, repeat)	\
+    NEAREST_AFFINE_FAST_PATH(name, format, repeat)			\
     BILINEAR_AFFINE_FAST_PATH(name, format, repeat)			\
-    NEAREST_AFFINE_FAST_PATH(name, format, repeat)
+    SEPARABLE_CONVOLUTION_AFFINE_FAST_PATH(name, format, repeat)
     
     AFFINE_FAST_PATHS (pad_a8r8g8b8, a8r8g8b8, PAD)
     AFFINE_FAST_PATHS (none_a8r8g8b8, a8r8g8b8, NONE)

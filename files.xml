@@ -11,6 +11,9 @@
 		<compilerflag value="-DHAVE_CONFIG_H" />
 		<compilerflag value="-DPIXMAN_NO_TLS" if="windows" />
 
+		<compilerflag value="-DPIXMAN_API=__declspec(dllexport)" if="dll_export" />
+		<compilerflag value="-DPIXMAN_API=" unless="dll_export" />
+
 		<compilerflag value="-DNATIVE_TOOLKIT_HAVE_PNG" if="NATIVE_TOOLKIT_HAVE_PNG" />
 		<compilerflag value="-I${NATIVE_TOOLKIT_PATH}/png" if="NATIVE_TOOLKIT_HAVE_PNG" />
 
